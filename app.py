@@ -44,8 +44,12 @@ def create_message_with_attachment(to, subject, body, attachment_path, original_
         message['subject'] = subject
         message['from'] = 'your_email@gmail.com'  # Replace with your Gmail address
 
-        # Add body to email
-        message.attach(MIMEText(body, 'plain'))
+        # Convert plain text body to HTML for proper formatting in Gmail
+        html_body = body.replace('\n', '<br>')
+        html_body = f'<html><body>{html_body}</body></html>'
+
+        # Add HTML body to email
+        message.attach(MIMEText(html_body, 'html'))
 
         # Add attachment if file exists
         if os.path.exists(attachment_path):
