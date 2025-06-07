@@ -6,19 +6,28 @@ async function loadCurrentAttachment() {
         const response = await fetch('/attachment_info');
         const result = await response.json();
         
-        if (result.filename && result.exists) {
-            showCurrentAttachment(result.filename);
+        if (result.filenames && result.filenames.length > 0 && result.exists) {
+            showCurrentAttachment(result.filenames);
         }
     } catch (err) {
-        console.log('No current attachment');
+        console.log('No current attachments');
     }
 }
 
-function showCurrentAttachment(filename) {
+function showCurrentAttachment(filenames) {
     const currentAttachmentDiv = document.getElementById('currentAttachment');
-    const currentAttachmentName = document.getElementById('currentAttachmentName');
+    const currentAttachmentList = document.getElementById('currentAttachmentList');
     
-    currentAttachmentName.textContent = filename;
+    // Clear existing list items
+    currentAttachmentList.innerHTML = '';
+    
+    // Populate the list with filenames
+    filenames.forEach(filename => {
+        const li = document.createElement('li');
+        li.textContent = filename;
+        currentAttachmentList.appendChild(li);
+    });
+    
     currentAttachmentDiv.classList.remove('hidden');
 }
 
@@ -26,20 +35,22 @@ function showCurrentAttachment(filename) {
 document.getElementById('attachmentForm').addEventListener('submit', async function(event) {
     event.preventDefault();
     
-    const attachmentFile = document.getElementById('attachment').files[0];
+    const attachmentFiles = document.getElementById('attachment').files;
     const attachmentStatus = document.getElementById('attachmentStatus');
     
-    if (!attachmentFile) {
-        showMessage(attachmentStatus, 'Please select a file', 'error');
+    if (!attachmentFiles || attachmentFiles.length === 0) {
+        showMessage(attachmentStatus, 'Please select at least one file', 'error');
         return;
     }
 
     const formData = new FormData();
-    formData.append('attachment', attachmentFile);
+    for (let file of attachmentFiles) {
+        formData.append('attachments', file);
+    }
 
     try {
         // Show uploading state
-        showMessage(attachmentStatus, 'Uploading attachment...', 'info');
+        showMessage(attachmentStatus, 'Uploading attachment(s)...', 'info');
         
         const response = await fetch('/upload_attachment', {
             method: 'POST',
@@ -51,7 +62,7 @@ document.getElementById('attachmentForm').addEventListener('submit', async funct
             showMessage(attachmentStatus, result.message, 'error');
         } else {
             showMessage(attachmentStatus, result.message, 'success');
-            showCurrentAttachment(result.filename);
+            showCurrentAttachment(result.filenames);
         }
     } catch (err) {
         showMessage(attachmentStatus, `Error: ${err.message}`, 'error');
@@ -97,9 +108,9 @@ document.getElementById('emailForm').addEventListener('submit', async function(e
             return;
         }
 
-        // Show success summary with attachment name
+        // Show success summary with attachment names
         let successMessage = `<strong>${result.summary}</strong><br><br>`;
-        successMessage += `<div class="mb-2"><strong>📎 Attachment:</strong> <span class="text-blue-600">${result.attachment_name}</span></div>`;
+        successMessage += `<div class="mb-2"><strong>📎 Attachment(s):</strong> <span class="text-blue-600">${result.attachment_names.join(', ')}</span></div>`;
         successMessage += '<div class="space-y-1 max-h-60 overflow-y-auto">';
         
         result.results.forEach(res => {
