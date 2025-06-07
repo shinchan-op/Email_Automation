@@ -20,8 +20,8 @@ app = Flask(__name__)
 SCOPES = ['https://www.googleapis.com/auth/gmail.compose']
 TOKEN_FILE = 'token.json'
 REDIRECT_URI = 'http://localhost:5000/callback'
-ATTACHMENT_PATH = None  # Will be set dynamically with original filename
-ORIGINAL_FILENAME = None  # Store original filename
+ATTACHMENT_PATHS = None  # Will be set dynamically with original filename
+ORIGINAL_FILENAMES = None  # Store original filename
 
 def authenticate_gmail():
     """Authenticate with Gmail API and return the service object."""
@@ -52,7 +52,8 @@ def create_message_with_attachment(to, subject, body, attachment_path, original_
         message.attach(MIMEText(html_body, 'html'))
 
         # Add attachment if file exists
-        if os.path.exists(attachment_path):
+        for attachment_path, original_filename in zip(ATTACHMENT_PATHS, ORIGINAL_FILENAMES):
+         if os.path.exists(attachment_path):
             with open(attachment_path, 'rb') as attachment:
                 part = MIMEBase('application', 'octet-stream')
                 part.set_payload(attachment.read())
@@ -76,7 +77,7 @@ def create_draft_with_attachment(service, to, subject, body):
     """Create a draft email with attachment."""
     try:
         # Create message with attachment using original filename
-        message = create_message_with_attachment(to, subject, body, ATTACHMENT_PATH, ORIGINAL_FILENAME)
+        message = create_message_with_attachment(to, subject, body, ATTACHMENT_PATHS, ORIGINAL_FILENAMES)
         
         # Create draft
         draft_body = {'message': message}
@@ -84,7 +85,7 @@ def create_draft_with_attachment(service, to, subject, body):
         
         return {
             'status': 'success', 
-            'message': f'✅ Draft created for {to} with attachment "{ORIGINAL_FILENAME}" - Draft ID: {result["id"]}'
+            'message': f'✅ Draft created for {to} with attachments "{len(ORIGINAL_FILENAMES)}"' f'{", ".join(ORIGINAL_FILENAMES)} - Draft ID: {result["id"]}'
         }
         
     except HttpError as error:
@@ -121,56 +122,70 @@ def callback():
     except Exception as e:
         return jsonify({'status': 'error', 'message': f'Authentication callback failed: {str(e)}'}), 500
 
-@app.route('/upload_attachment', methods=['POST'])
+@app.route("/upload_attachment", methods=["POST"])
 def upload_attachment():
-    """Upload common attachment file with original filename preserved."""
-    global ATTACHMENT_PATH, ORIGINAL_FILENAME
-    
+    """Upload multiple attachment files with original filenames preserved."""
+    global ATTACHMENT_PATHS, ORIGINAL_FILENAMES
+
     try:
-        if 'attachment' not in request.files:
-            return jsonify({'status': 'error', 'message': 'No attachment file uploaded'}), 400
-        
-        file = request.files['attachment']
-        if file.filename == '':
-            return jsonify({'status': 'error', 'message': 'No file selected'}), 400
-        
-        # Store original filename
-        ORIGINAL_FILENAME = file.filename
-        
-        # Create a safe path with original filename
-        # Remove any path characters to prevent directory traversal
-        safe_filename = os.path.basename(ORIGINAL_FILENAME)
-        ATTACHMENT_PATH = f'attachments/{safe_filename}'
-        
-        # Create attachments directory if it doesn't exist
-        os.makedirs('attachments', exist_ok=True)
-        
-        # Save the attachment with original filename
-        file.save(ATTACHMENT_PATH)
-        
+        ATTACHMENT_PATHS = []
+        ORIGINAL_FILENAMES = []
+
+        files = request.files.getlist("attachments")
+        if not files or all(file.filename == "" for file in files):
+            return jsonify({
+                "status": "error",
+                "message": "No attachment files selected",
+            }), 400
+
+        allowed_extensions = {".pdf", ".doc", ".docx", ".txt", ".jpg", ".png"}
+        for file in files:
+            if file.filename == "":
+                continue
+            original_filename = file.filename
+            if not any(original_filename.lower().endswith(ext) for ext in allowed_extensions):
+                return jsonify({
+                    "status": "error",
+                    "message": (
+                        f'File "{original_filename}" must be one of: '
+                        f'{", ".join(allowed_extensions)}'
+                    ),
+                }), 400
+
+            safe_filename = os.path.basename(original_filename)
+            attachment_path = f"attachments/{safe_filename}"
+            os.makedirs("attachments", exist_ok=True)
+            file.save(attachment_path)
+
+            ATTACHMENT_PATHS.append(attachment_path)
+            ORIGINAL_FILENAMES.append(original_filename)
+
         return jsonify({
-            'status': 'success', 
-            'message': f'Attachment "{ORIGINAL_FILENAME}" uploaded successfully',
-            'filename': ORIGINAL_FILENAME
+            "status": "success",
+            "message": (
+                f"{len(ORIGINAL_FILENAMES)} attachment(s) uploaded successfully: "
+                f'{", ".join(ORIGINAL_FILENAMES)}'
+            ),
+            "filenames": ORIGINAL_FILENAMES,
         })
-    
+
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/create_drafts', methods=['POST'])
 def create_drafts():
-    """Process Excel file and create draft emails with attachments."""
+    """Process Excel file and create draft emails with multiple attachments."""
     try:
         service = authenticate_gmail()
         file = request.files['excel_file']
         template = request.form['template']
         
         if not file:
-            return jsonify({'status': 'error', 'message': 'No file uploaded'}), 400
+            return jsonify({'status': 'error', 'message': 'No Excel file uploaded'}), 400
 
         # Check if attachment exists
-        if not ATTACHMENT_PATH or not os.path.exists(ATTACHMENT_PATH):
-            return jsonify({'status': 'error', 'message': 'Please upload a common attachment first'}), 400
+        if not ATTACHMENT_PATHS or not all (os.path.exists(path) for path in ATTACHMENT_PATHS):
+            return jsonify({'status': 'error', 'message': 'Please upload at least one common attachment first'}), 400
 
         # Read Excel file - only need email, company_name, subject columns
         df = pd.read_excel(file, engine='openpyxl')
@@ -199,8 +214,9 @@ def create_drafts():
         return jsonify({
             'status': 'success', 
             'results': results,
-            'summary': f'Created {success_count} drafts with attachment "{ORIGINAL_FILENAME}"! {error_count} failed. Check Gmail Drafts folder.',
-            'attachment_name': ORIGINAL_FILENAME
+            'summary': f'Created {success_count} drafts with {len(ORIGINAL_FILENAMES)}' 
+            f'attachment(s): {", ".join(ORIGINAL_FILENAMES)}! ' f'{error_count} failed. Check Gmail Drafts folder.',
+            'attachment_names': ORIGINAL_FILENAMES,
         })
     
     except Exception as e:
@@ -210,9 +226,9 @@ def create_drafts():
 def attachment_info():
     """Get current attachment information."""
     return jsonify({
-        'filename': ORIGINAL_FILENAME,
-        'path': ATTACHMENT_PATH,
-        'exists': ATTACHMENT_PATH and os.path.exists(ATTACHMENT_PATH) if ATTACHMENT_PATH else False
+        'filenames': ORIGINAL_FILENAMES,
+        'paths': ATTACHMENT_PATHS,
+        'exists': all(os.path.exists(path) for path in ATTACHMENT_PATHS) if ATTACHMENT_PATHS else False,
     })
 
 if __name__ == '__main__':
