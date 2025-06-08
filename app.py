@@ -171,6 +171,53 @@ def upload_attachment():
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+    
+@app.route("/preview_emails", methods=["POST"])
+def preview_emails():
+    """
+    Generate a preview of emails by replacing placeholders in the template.
+
+    Returns:
+        JSON response with a list of previews (email, subject, body) for each recipient.
+    """
+    try:
+        file = request.files["excel_file"]
+        template = request.form["template"]
+
+        if not file:
+            return jsonify({
+                "status": "error",
+                "message": "No Excel file uploaded",
+            }), 400
+
+        # Read Excel file
+        df = pd.read_excel(file, engine="openpyxl")
+        required_columns = ["email", "company_name", "subject"]
+        if not all(col in df.columns for col in required_columns):
+            return jsonify({
+                "status": "error",
+                "message": "Excel file must contain: email, company_name, subject columns",
+            }), 400
+
+        previews = []
+        for index, row in df.iterrows():
+            email = row["email"]
+            company_name = row["company_name"]
+            subject = row["subject"]
+            body = template.format(company_name=company_name)
+            previews.append({
+                "email": email,
+                "subject": subject,
+                "body": body,
+            })
+
+        return jsonify({
+            "status": "success",
+            "previews": previews,
+        })
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/create_drafts', methods=['POST'])
 def create_drafts():

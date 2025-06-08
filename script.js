@@ -31,6 +31,76 @@ function showCurrentAttachment(filenames) {
     currentAttachmentDiv.classList.remove('hidden');
 }
 
+// Handle preview emails
+document.getElementById('previewButton').addEventListener('click', async function(event) {
+    event.preventDefault();
+    
+    const excelFile = document.getElementById('excel_file').files[0];
+    const template = document.getElementById('template').value;
+    const previewModal = document.getElementById('previewModal');
+    const previewContent = document.getElementById('previewContent');
+    const errorDiv = document.getElementById('error');
+    
+    // Hide previous messages
+    errorDiv.classList.add('hidden');
+    
+    if (!excelFile) {
+        showMessage(errorDiv, 'Please upload an Excel file first', 'error');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('excel_file', excelFile);
+    formData.append('template', template);
+
+    try {
+        const response = await fetch('/preview_emails', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (result.status === 'error') {
+            showMessage(errorDiv, result.message, 'error');
+            return;
+        }
+
+        // Clear previous preview content
+        previewContent.innerHTML = '';
+
+        // Display each previewed email
+        result.previews.forEach(preview => {
+            const previewDiv = document.createElement('div');
+            previewDiv.className = 'border-b border-gray-200 pb-4';
+            previewDiv.innerHTML = `
+                <div class="mb-2">
+                    <strong>To:</strong> <span class="text-blue-600">${preview.email}</span>
+                </div>
+                <div class="mb-2">
+                    <strong>Subject:</strong> <span class="text-blue-600">${preview.subject}</span>
+                </div>
+                <div class="mb-2">
+                    <strong>Body:</strong>
+                    <div class="mt-1 text-gray-700 whitespace-pre-wrap">${preview.body}</div>
+                </div>
+            `;
+            previewContent.appendChild(previewDiv);
+        });
+
+        // Show the modal
+        previewModal.classList.remove('hidden');
+        
+    } catch (err) {
+        showMessage(errorDiv, `Error: ${err.message}`, 'error');
+    }
+});
+
+// Close preview modal
+document.getElementById('closePreview').addEventListener('click', function() {
+    const previewModal = document.getElementById('previewModal');
+    previewModal.classList.add('hidden');
+});
+
 // Handle attachment upload
 document.getElementById('attachmentForm').addEventListener('submit', async function(event) {
     event.preventDefault();
