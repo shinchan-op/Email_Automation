@@ -12,7 +12,6 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import base64
-import os
 
 app = Flask(__name__)
 
@@ -20,8 +19,8 @@ app = Flask(__name__)
 SCOPES = ['https://www.googleapis.com/auth/gmail.compose']
 TOKEN_FILE = 'token.json'
 REDIRECT_URI = 'http://localhost:5000/callback'
-ATTACHMENT_PATHS = None  # Will be set dynamically with original filename
-ORIGINAL_FILENAMES = None  # Store original filename
+ATTACHMENT_PATHS = []  # Store multiple attachment paths
+ORIGINAL_FILENAMES = []  # Store original filenames
 
 def authenticate_gmail():
     """Authenticate with Gmail API and return the service object."""
@@ -35,8 +34,8 @@ def authenticate_gmail():
             token.write(creds.to_json())
     return build('gmail', 'v1', credentials=creds)
 
-def create_message_with_attachment(to, subject, body, attachment_path, original_filename):
-    """Create email message with attachment using original filename."""
+def create_message_with_attachment(to, subject, body, attachment_paths, original_filenames, signature):
+    """Create email message with attachments using original filenames."""
     try:
         # Create multipart message
         message = MIMEMultipart()
@@ -44,27 +43,30 @@ def create_message_with_attachment(to, subject, body, attachment_path, original_
         message['subject'] = subject
         message['from'] = 'your_email@gmail.com'  # Replace with your Gmail address
 
+        # Append the signature to the body with a double newline separator
+        full_body = f"{body}\n\n{signature}" if signature else body
+        
         # Convert plain text body to HTML for proper formatting in Gmail
-        html_body = body.replace('\n', '<br>')
+        html_body = full_body.replace('\n', '<br>')  # Fixed: Use full_body instead of body
         html_body = f'<html><body>{html_body}</body></html>'
 
         # Add HTML body to email
         message.attach(MIMEText(html_body, 'html'))
 
-        # Add attachment if file exists
-        for attachment_path, original_filename in zip(ATTACHMENT_PATHS, ORIGINAL_FILENAMES):
-         if os.path.exists(attachment_path):
-            with open(attachment_path, 'rb') as attachment:
-                part = MIMEBase('application', 'octet-stream')
-                part.set_payload(attachment.read())
-            
-            encoders.encode_base64(part)
-            # Use original filename in the attachment header
-            part.add_header(
-                'Content-Disposition',
-                f'attachment; filename= {original_filename}'
-            )
-            message.attach(part)
+        # Add attachments if they exist
+        for attachment_path, original_filename in zip(attachment_paths, original_filenames):
+            if os.path.exists(attachment_path):
+                with open(attachment_path, 'rb') as attachment:
+                    part = MIMEBase('application', 'octet-stream')
+                    part.set_payload(attachment.read())
+                
+                encoders.encode_base64(part)
+                # Use original filename in the attachment header
+                part.add_header(
+                    'Content-Disposition',
+                    f'attachment; filename="{original_filename}"'  # Fixed: Proper quotes around filename
+                )
+                message.attach(part)
 
         # Encode message
         raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
@@ -73,11 +75,11 @@ def create_message_with_attachment(to, subject, body, attachment_path, original_
     except Exception as e:
         raise Exception(f"Error creating message: {str(e)}")
 
-def create_draft_with_attachment(service, to, subject, body):
-    """Create a draft email with attachment."""
+def create_draft_with_attachment(service, to, subject, body, signature):
+    """Create a draft email with attachments."""
     try:
-        # Create message with attachment using original filename
-        message = create_message_with_attachment(to, subject, body, ATTACHMENT_PATHS, ORIGINAL_FILENAMES)
+        # Create message with attachments using original filenames
+        message = create_message_with_attachment(to, subject, body, ATTACHMENT_PATHS, ORIGINAL_FILENAMES, signature)
         
         # Create draft
         draft_body = {'message': message}
@@ -85,7 +87,7 @@ def create_draft_with_attachment(service, to, subject, body):
         
         return {
             'status': 'success', 
-            'message': f'✅ Draft created for {to} with attachments "{len(ORIGINAL_FILENAMES)}"' f'{", ".join(ORIGINAL_FILENAMES)} - Draft ID: {result["id"]}'
+            'message': f'✅ Draft created for {to} with {len(ORIGINAL_FILENAMES)} attachment(s): {", ".join(ORIGINAL_FILENAMES)} - Draft ID: {result["id"]}'  # Fixed: Improved string formatting
         }
         
     except HttpError as error:
@@ -183,6 +185,7 @@ def preview_emails():
     try:
         file = request.files["excel_file"]
         template = request.form["template"]
+        signature = request.form.get("signature", "")  # Fixed: Retrieve signature
 
         if not file:
             return jsonify({
@@ -205,10 +208,14 @@ def preview_emails():
             company_name = row["company_name"]
             subject = row["subject"]
             body = template.format(company_name=company_name)
+            
+            # Append the signature to the body with a double newline separator
+            full_body = f"{body}\n\n{signature}" if signature else body
+            
             previews.append({
                 "email": email,
                 "subject": subject,
-                "body": body,
+                "body": full_body,  # Fixed: Use full_body to include signature
             })
 
         return jsonify({
@@ -226,13 +233,14 @@ def create_drafts():
         service = authenticate_gmail()
         file = request.files['excel_file']
         template = request.form['template']
+        signature = request.form.get("signature", "")
         
         if not file:
             return jsonify({'status': 'error', 'message': 'No Excel file uploaded'}), 400
 
         # Check if attachment exists
-        if not ATTACHMENT_PATHS or not all (os.path.exists(path) for path in ATTACHMENT_PATHS):
-            return jsonify({'status': 'error', 'message': 'Please upload at least one common attachment first'}), 400
+        if not ATTACHMENT_PATHS or not all(os.path.exists(path) for path in ATTACHMENT_PATHS):
+            return jsonify({'status': 'error', 'message': 'Please upload at least one attachment first'}), 400
 
         # Read Excel file - only need email, company_name, subject columns
         df = pd.read_excel(file, engine='openpyxl')
@@ -252,7 +260,7 @@ def create_drafts():
             body = template.format(company_name=company_name)
             
             # Create draft immediately
-            result = create_draft_with_attachment(service, email, subject, body)
+            result = create_draft_with_attachment(service, email, subject, body, signature)
             results.append(result)
 
         success_count = len([r for r in results if r['status'] == 'success'])
@@ -261,8 +269,7 @@ def create_drafts():
         return jsonify({
             'status': 'success', 
             'results': results,
-            'summary': f'Created {success_count} drafts with {len(ORIGINAL_FILENAMES)}' 
-            f'attachment(s): {", ".join(ORIGINAL_FILENAMES)}! ' f'{error_count} failed. Check Gmail Drafts folder.',
+            'summary': f'Created {success_count} drafts with {len(ORIGINAL_FILENAMES)} attachment(s): {", ".join(ORIGINAL_FILENAMES)}! {error_count} failed. Check Gmail Drafts folder.',
             'attachment_names': ORIGINAL_FILENAMES,
         })
     
