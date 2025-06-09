@@ -37,6 +37,7 @@ document.getElementById('previewButton').addEventListener('click', async functio
     
     const excelFile = document.getElementById('excel_file').files[0];
     const template = document.getElementById('template').value;
+    const signature = document.getElementById('signature').value;
     const previewModal = document.getElementById('previewModal');
     const previewContent = document.getElementById('previewContent');
     const errorDiv = document.getElementById('error');
@@ -52,6 +53,7 @@ document.getElementById('previewButton').addEventListener('click', async functio
     const formData = new FormData();
     formData.append('excel_file', excelFile);
     formData.append('template', template);
+    formData.append('signature', signature);
 
     try {
         const response = await fetch('/preview_emails', {
@@ -145,6 +147,7 @@ document.getElementById('emailForm').addEventListener('submit', async function(e
     
     const excelFile = document.getElementById('excel_file').files[0];
     const template = document.getElementById('template').value;
+    const signature = document.getElementById('signature').value;
     const statusDiv = document.getElementById('status');
     const errorDiv = document.getElementById('error');
     
@@ -155,6 +158,7 @@ document.getElementById('emailForm').addEventListener('submit', async function(e
     const formData = new FormData();
     formData.append('excel_file', excelFile);
     formData.append('template', template);
+    formData.append('signature', signature);
 
     try {
         // Show loading state
