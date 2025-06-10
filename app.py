@@ -12,6 +12,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 import base64
+import re
 
 app = Flask(__name__)
 
@@ -33,6 +34,16 @@ def authenticate_gmail():
         with open(TOKEN_FILE, 'w') as token:
             token.write(creds.to_json())
     return build('gmail', 'v1', credentials=creds)
+
+def validate_email(email): 
+    """ Validate an email address using a regular expression.
+    Args: email (str): Email address to validate.
+    Returns:  bool: True if the email is valid, False otherwise. """
+   
+   
+    # Basic email regex: user@domain.tld 
+    email_pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+    return bool(re.match(email_pattern, email))
 
 def create_message_with_attachment(to, subject, body, attachment_paths, original_filenames, signature):
     """Create email message with attachments using original filenames."""
@@ -201,7 +212,21 @@ def preview_emails():
                 "status": "error",
                 "message": "Excel file must contain: email, company_name, subject columns",
             }), 400
-
+            
+        # Validate email addresses
+        invalid_emails = []
+        for index, row in df.iterrows():
+            email = row["email"]
+            if not validate_email(email):
+                invalid_emails.append({"email": email, "row": index + 2}) # +2 to account for header and 1- based indexing
+                
+        if invalid_emails:
+            return jsonify({
+                "status": "error",
+                "message": "Invalid email addresses found",
+                "invalid_emails": invalid_emails
+            }), 400
+            
         previews = []
         for index, row in df.iterrows():
             email = row["email"]
@@ -250,6 +275,13 @@ def create_drafts():
                 'status': 'error', 
                 'message': 'Excel file must contain: email, company_name, subject columns'
             }), 400
+            
+         # Validate email addresses
+        invalid_emails = []
+        for index, row in df.iterrows():
+            email = row["email"]
+            if not validate_email(email):
+                invalid_emails.append({"email": email, "row": index + 2})    
 
         results = []
         
@@ -259,6 +291,14 @@ def create_drafts():
             subject = row['subject']
             body = template.format(company_name=company_name)
             
+            # Skip draft creation for invalid emails
+            if not validate_email(email):
+                results.append({
+                    "status": "error",
+                    "message": f"❌ Skipped draft for {email}: Invalid email address"
+                 })
+                
+             
             # Create draft immediately
             result = create_draft_with_attachment(service, email, subject, body, signature)
             results.append(result)
