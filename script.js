@@ -63,7 +63,15 @@ document.getElementById('previewButton').addEventListener('click', async functio
         const result = await response.json();
 
         if (result.status === 'error') {
-            showMessage(errorDiv, result.message, 'error');
+            if (result.invalid_emails) {
+                let errorMessage = 'Invalid email addresses found:<br>' ;
+                result.invalid_emails.forEach(item => {
+                    errorMessage += 'Row ${item.row}: ${item.email}<br>' ;
+                });
+                showMessage(errorDiv, errorMessage, 'error');
+            } else {
+                showMessage(errorDiv, result.message, 'error');
+            }
             return;
         }
 
@@ -185,6 +193,25 @@ document.getElementById('emailForm').addEventListener('submit', async function(e
         // Show success summary with attachment names
         let successMessage = `<strong>${result.summary}</strong><br><br>`;
         successMessage += `<div class="mb-2"><strong>📎 Attachment(s):</strong> <span class="text-blue-600">${result.attachment_names.join(', ')}</span></div>`;
+        successMessage += '<div class="space-y-1 max-h-60 overflow-y-auto">';
+        
+        result.results.forEach(res => {
+            if (res.status === 'success') {
+                successMessage += `<div class="text-green-600">${res.message}</div>`;
+            } else {
+                successMessage += `<div class="text-red-600">${res.message}</div>`;
+            }
+        });
+        
+        // Add invalid email errors if any
+        if (result.invalid_emails) {
+            successMessage += `<div class="mb-2 text-red-600"><strong>Invalid Emails:</strong><br>`;
+            result.invalid_emails.forEach(item => {
+                successMessage += `Row ${item.row}: ${item.email}<br>`;
+            });
+            successMessage += `</div>`;
+        }
+
         successMessage += '<div class="space-y-1 max-h-60 overflow-y-auto">';
         
         result.results.forEach(res => {
